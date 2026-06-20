@@ -16,6 +16,15 @@ interface Port {
   connectedNodes: number[];
 }
 
+interface Player {
+  id: string;
+  name: string;
+  color: string;
+  inventory: string[];
+  devCards: string[];
+  tradeRates: { [resource: string]: number };
+}
+
 interface GameState {
   board: {
     hexes: HexCoord[];
@@ -25,7 +34,7 @@ interface GameState {
     edges: { id: number; nodes: number[] }[];
     nodeAdjacency: Record<number, number[]>;
   };
-  players: { id: string; name: string; color: string; inventory: string[] }[];
+  players: Player[];
   buildings: Record<string, { owner: string; type: string }>;
   roads: Record<string, string>;
 }

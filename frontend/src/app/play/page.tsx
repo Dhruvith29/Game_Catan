@@ -3,8 +3,17 @@
 import { useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
+interface Player {
+  id: string;
+  name: string;
+  color: string;
+  inventory: string[];
+  devCards: string[];
+  tradeRates: { [resource: string]: number };
+}
+
 interface GameState {
-  players: { id: string; name: string; color: string; inventory: string[]; devCards: string[] }[];
+  players: Player[];
   activePlayerIndex: number;
   turnPhase: string;
   setupPhaseState: Record<string, { settlement: boolean; road: boolean }>;
@@ -435,7 +444,7 @@ export default function PlayPage() {
                     </button>
                   </div>
                 ) : gameState.turnPhase === 'SETUP' ? (() => {
-                  const pState = gameState.setupPhaseState ? gameState.setupPhaseState[socket.id] : null;
+                  const pState = gameState.setupPhaseState && socket?.id ? gameState.setupPhaseState[socket.id] : null;
                   const needsSettlement = !pState || !pState.settlement;
                   const needsRoad = !pState || !pState.road;
                   
