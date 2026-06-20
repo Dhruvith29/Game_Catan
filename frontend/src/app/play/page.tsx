@@ -220,7 +220,7 @@ export default function PlayPage() {
     if (socket && roomCode && gameState) {
       const myData = gameState.players.find(p => p.id === socket.id);
       if (myData) {
-        const rate = myData.tradeRates[offerRes] || 4;
+        const rate = (myData as any).tradeRates ? (myData as any).tradeRates[offerRes] || 4 : 4;
         const hasCount = myData.inventory.filter(r => r === offerRes).length;
         if (hasCount < rate) {
           setError(`You need ${rate} ${offerRes} to trade.`);
@@ -571,7 +571,7 @@ export default function PlayPage() {
                               <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 border-b border-slate-800 pb-1">Your Exchange Rates</h4>
                               <div className="grid grid-cols-2 gap-2 text-sm">
                                 {['Wood', 'Brick', 'Sheep', 'Wheat', 'Ore'].map(res => {
-                                  const rate = myData?.tradeRates?.[res] || 4;
+                                  const rate = (myData as any)?.tradeRates?.[res] || 4;
                                   const isSpecial = rate < 4;
                                   return (
                                     <div key={res} className={`flex justify-between px-2 py-1 rounded ${isSpecial ? 'bg-indigo-900/50 text-indigo-300 font-bold' : 'text-slate-300'}`}>
@@ -584,7 +584,7 @@ export default function PlayPage() {
                             </div>
                             <div className="flex space-x-2 items-end">
                               <div className="w-[45%]">
-                                <p className="text-xs text-slate-400 mb-1 uppercase">Give ({myData?.tradeRates?.[offerRes] || 4})</p>
+                                <p className="text-xs text-slate-400 mb-1 uppercase">Give ({(myData as any)?.tradeRates?.[offerRes] || 4})</p>
                                 <select value={offerRes} onChange={e => setOfferRes(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white font-bold">
                                   {['Wood', 'Brick', 'Sheep', 'Wheat', 'Ore'].map(r => <option key={r} value={r}>{r}</option>)}
                                 </select>
@@ -599,7 +599,7 @@ export default function PlayPage() {
                             </div>
                             <button 
                               onClick={handleMaritimeTrade} 
-                              disabled={(myData?.inventory.filter(r => r === offerRes).length || 0) < (myData?.tradeRates?.[offerRes] || 4)}
+                              disabled={(myData?.inventory.filter(r => r === offerRes).length || 0) < ((myData as any)?.tradeRates?.[offerRes] || 4)}
                               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 rounded-xl shadow-lg transition mt-2">
                               TRADE WITH BANK
                             </button>
