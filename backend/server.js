@@ -179,6 +179,8 @@ io.on('connection', (socket) => {
         longestRoadOwner: null,
         longestRoadLength: 4,
         largestArmyOwner: null,
+        largestArmySize: 2,
+        knightsPlayed: {},
         devCardDeck,
         discardingPlayers: {},
         robberVictims: [],
@@ -605,6 +607,13 @@ io.on('connection', (socket) => {
 
       if (type === 'Knight') {
         state.turnPhase = 'MOVE_ROBBER';
+        state.knightsPlayed[socket.id] = (state.knightsPlayed[socket.id] || 0) + 1;
+        
+        if (state.knightsPlayed[socket.id] > state.largestArmySize) {
+          state.largestArmySize = state.knightsPlayed[socket.id];
+          state.largestArmyOwner = socket.id;
+          io.to(code).emit('game_message', { message: `${playerObj.name} took the Largest Army!` });
+        }
       } else if (type === 'Year of Plenty') {
         playerObj.inventory.push(resource1);
         playerObj.inventory.push(resource2);

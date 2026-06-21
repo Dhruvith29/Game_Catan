@@ -37,6 +37,8 @@ interface GameState {
   players: Player[];
   longestRoadOwner?: string;
   longestRoadLength?: number;
+  largestArmyOwner?: string;
+  largestArmySize?: number;
   buildings: Record<string, { owner: string; type: string }>;
   roads: Record<string, string>;
 }
@@ -385,6 +387,7 @@ export default function HostPage() {
             <div key={p.id} className="backdrop-blur-sm px-6 py-3 rounded-xl text-white font-bold shadow-2xl border-2 flex items-center" style={{ backgroundColor: `${p.color}dd`, borderColor: p.color }}>
               <span>{p.name}</span>
               {gameState.longestRoadOwner === p.id && <span className="bg-yellow-500 text-yellow-950 text-[10px] px-2 py-0.5 rounded-full ml-2 shadow-sm font-black whitespace-nowrap tracking-wider">LONGEST ROAD</span>}
+              {gameState.largestArmyOwner === p.id && <span className="bg-red-500 text-red-950 text-[10px] px-2 py-0.5 rounded-full ml-2 shadow-sm font-black whitespace-nowrap tracking-wider">LARGEST ARMY</span>}
             </div>
           )) : players.map((p) => (
             <div key={p.id} className="bg-indigo-600/90 backdrop-blur-sm px-6 py-3 rounded-xl text-white font-bold shadow-2xl border border-indigo-400">
