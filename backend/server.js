@@ -257,14 +257,29 @@ io.on('connection', (socket) => {
     const pState = state.setupPhaseState[activePlayerId];
     
     evaluateWinner(code);
-      broadcastState(code, 'turn_ended');
+    broadcastState(code, 'turn_ended');
     
     if (pState && pState.settlement && pState.road) {
       pState.settlement = false;
       pState.road = false;
 
-      state.setupTurnCount += 1;
       const numPlayers = state.players.length;
+
+      if (state.setupTurnCount >= numPlayers) {
+        const lastNodeId = pState.lastSettlement;
+        const playerObj = state.players.find(p => p.id === activePlayerId);
+        
+        if (lastNodeId !== undefined) {
+          const adjacentHexes = state.board.hexes.filter(h => h.nodes.includes(Number(lastNodeId)));
+          adjacentHexes.forEach(hex => {
+            if (hex.resourceType !== 'Desert') {
+              playerObj.inventory.push(hex.resourceType);
+            }
+          });
+        }
+      }
+
+      state.setupTurnCount += 1;
       
       if (state.setupTurnCount >= numPlayers * 2) {
         state.turnPhase = 'waiting_for_roll';
@@ -273,6 +288,7 @@ io.on('connection', (socket) => {
         const tc = state.setupTurnCount;
         state.activePlayerIndex = tc < numPlayers ? tc : (2 * numPlayers - 1 - tc);
       }
+      
       evaluateWinner(code);
       broadcastState(code, 'turn_ended');
     }
