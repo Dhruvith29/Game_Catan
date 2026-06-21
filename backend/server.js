@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const { generateBoard, distributeResources, validateSettlement, validateRoad, validateCity, getPlayerTradeRates } = require('./gameLogic');
+const { generateBoard, distributeResources, validateSettlement, validateRoad, validateCity, getPlayerTradeRates, calculateLongestRoad } = require('./gameLogic');
 
 const app = express();
 app.use(cors());
@@ -41,6 +41,56 @@ const saveSnapshot = (code) => {
   if (rooms[code] && rooms[code].gameState) {
     if (!rooms[code].undoStack) rooms[code].undoStack = [];
     rooms[code].undoStack.push(JSON.parse(JSON.stringify(rooms[code].gameState)));
+  }
+};
+
+const broadcastState = (code, eventName, extraData = {}) => {
+  const room = rooms[code];
+  if (!room || !room.gameState) return;
+  const state = room.gameState;
+  
+  const sendToSocket = (socketId) => {
+    const sanitized = JSON.parse(JSON.stringify(state));
+    sanitized.players.forEach(p => {
+      if (p.id !== socketId && socketId !== room.hostId) {
+        p.devCards = p.devCards.map(card => card === 'Victory Point' ? 'Hidden VP' : card);
+      }
+    });
+    if (eventName === 'game_started') {
+      io.to(socketId).emit('game_started', sanitized);
+    } else {
+      io.to(socketId).emit(eventName, { ...extraData, gameState: sanitized });
+    }
+  };
+
+  room.players.forEach(p => sendToSocket(p.id));
+  sendToSocket(room.hostId);
+};
+
+const evaluateWinner = (code) => {
+  const room = rooms[code];
+  if (!room || !room.gameState || room.status === 'GAME_OVER') return;
+  const state = room.gameState;
+
+  for (const player of state.players) {
+    let score = 0;
+    
+    Object.values(state.buildings).forEach(b => {
+      if (b.owner === player.id) {
+        score += b.type === 'city' ? 2 : 1;
+      }
+    });
+    
+    if (state.longestRoadOwner === player.id) score += 2;
+    if (state.largestArmyOwner === player.id) score += 2;
+    
+    score += player.devCards.filter(c => c === 'Victory Point').length;
+
+    if (score >= 10) {
+      room.status = 'GAME_OVER';
+      io.to(code).emit('game_over', { winnerId: player.id, winnerName: player.name, score });
+      return;
+    }
   }
 };
 
@@ -126,6 +176,9 @@ io.on('connection', (socket) => {
         setupPhaseState: {},
         buildings,
         roads: {},
+        longestRoadOwner: null,
+        longestRoadLength: 4,
+        largestArmyOwner: null,
         devCardDeck,
         discardingPlayers: {},
         robberVictims: [],
@@ -136,7 +189,7 @@ io.on('connection', (socket) => {
       rooms[code].undoStack = [];
       
       console.log(`Game started in room ${code}`);
-      io.to(code).emit('game_started', rooms[code].gameState);
+      broadcastState(code, 'game_started');
     }
   });
 
@@ -147,7 +200,7 @@ io.on('connection', (socket) => {
       const state = rooms[code].gameState;
       
       if (state.players[state.activePlayerIndex].id !== socket.id) return;
-      if (state.turnPhase !== 'ROLL') return;
+      if (state.turnPhase !== 'waiting_for_roll') return;
 
       const roll1 = Math.floor(Math.random() * 6) + 1;
       const roll2 = Math.floor(Math.random() * 6) + 1;
@@ -172,13 +225,10 @@ io.on('connection', (socket) => {
         }
       } else {
         distributeResources(rollSum, state);
-        state.turnPhase = 'MAIN_ACTION';
+        state.turnPhase = 'main_action';
       }
       
-      io.to(code).emit('dice_rolled', {
-        roll1, roll2, rollSum,
-        gameState: state
-      });
+      broadcastState(code, 'dice_rolled', { roll1, roll2, rollSum });
     }
   });
 
@@ -189,15 +239,16 @@ io.on('connection', (socket) => {
       const state = rooms[code].gameState;
       
       if (state.players[state.activePlayerIndex].id !== socket.id) return;
-      if (state.turnPhase !== 'MAIN_ACTION') return;
+      if (state.turnPhase !== 'main_action') return;
 
       state.activePlayerIndex = (state.activePlayerIndex + 1) % state.players.length;
-      state.turnPhase = 'ROLL';
+      state.turnPhase = 'waiting_for_roll';
       state.hasPlayedDevCardThisTurn = false;
       
       console.log(`Room ${code} turn ended. New active player: ${state.players[state.activePlayerIndex].name}`);
       
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -205,7 +256,8 @@ io.on('connection', (socket) => {
     const activePlayerId = state.players[state.activePlayerIndex].id;
     const pState = state.setupPhaseState[activePlayerId];
     
-    io.to(code).emit('turn_ended', { gameState: state });
+    evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     
     if (pState && pState.settlement && pState.road) {
       pState.settlement = false;
@@ -215,13 +267,14 @@ io.on('connection', (socket) => {
       const numPlayers = state.players.length;
       
       if (state.setupTurnCount >= numPlayers * 2) {
-        state.turnPhase = 'ROLL';
+        state.turnPhase = 'waiting_for_roll';
         state.activePlayerIndex = 0;
       } else {
         const tc = state.setupTurnCount;
         state.activePlayerIndex = tc < numPlayers ? tc : (2 * numPlayers - 1 - tc);
       }
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   }
 
@@ -234,7 +287,7 @@ io.on('connection', (socket) => {
         socket.emit('game_error', { message: "It's not your turn!" });
         return;
       }
-      if (state.turnPhase !== 'SETUP' && state.turnPhase !== 'MAIN_ACTION') {
+      if (state.turnPhase !== 'SETUP' && state.turnPhase !== 'main_action') {
         socket.emit('game_error', { message: "You cannot build right now." });
         return;
       }
@@ -273,7 +326,8 @@ io.on('connection', (socket) => {
         state.setupPhaseState[socket.id].lastSettlement = nodeId;
         checkSetupTurnProgress(state, code);
       } else {
-        io.to(code).emit('turn_ended', { gameState: state });
+        evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
       }
     }
   });
@@ -287,7 +341,7 @@ io.on('connection', (socket) => {
         socket.emit('game_error', { message: "It's not your turn!" });
         return;
       }
-      if (state.turnPhase !== 'SETUP' && state.turnPhase !== 'MAIN_ACTION' && state.turnPhase !== 'ROAD_BUILDING_CARD') {
+      if (state.turnPhase !== 'SETUP' && state.turnPhase !== 'main_action' && state.turnPhase !== 'ROAD_BUILDING_CARD') {
         socket.emit('game_error', { message: "You cannot build right now." });
         return;
       }
@@ -317,6 +371,13 @@ io.on('connection', (socket) => {
       }
 
       state.roads[edgeId] = socket.id;
+      
+      const newRoadLen = calculateLongestRoad(socket.id, state);
+      if (newRoadLen > state.longestRoadLength) {
+        state.longestRoadLength = newRoadLen;
+        state.longestRoadOwner = socket.id;
+        io.to(code).emit('game_message', { message: `${state.players.find(p => p.id === socket.id).name} took the Longest Road!` });
+      }
 
       if (isSetupPhase) {
         if (!state.setupPhaseState[socket.id]) state.setupPhaseState[socket.id] = { settlement: false, road: false };
@@ -325,11 +386,13 @@ io.on('connection', (socket) => {
       } else if (isRoadBuilding) {
         state.roadBuildingRoadsPlaced = (state.roadBuildingRoadsPlaced || 0) + 1;
         if (state.roadBuildingRoadsPlaced >= 2) {
-          state.turnPhase = 'MAIN_ACTION';
+          state.turnPhase = 'main_action';
         }
-        io.to(code).emit('turn_ended', { gameState: state });
+        evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
       } else {
-        io.to(code).emit('turn_ended', { gameState: state });
+        evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
       }
     }
   });
@@ -398,7 +461,8 @@ io.on('connection', (socket) => {
       io.to(proposerId).emit('game_message', { message: `Trade accepted by ${target.name}!` });
       socket.emit('game_message', { message: "Trade complete!" });
 
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -419,7 +483,7 @@ io.on('connection', (socket) => {
         socket.emit('game_error', { message: "It's not your turn!" });
         return;
       }
-      if (state.turnPhase !== 'MAIN_ACTION') {
+      if (state.turnPhase !== 'main_action') {
         socket.emit('game_error', { message: "You cannot build right now." });
         return;
       }
@@ -442,7 +506,8 @@ io.on('connection', (socket) => {
       const playerObjForRates = state.players.find(p => p.id === socket.id);
       playerObjForRates.tradeRates = getPlayerTradeRates(socket.id, state);
 
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -456,7 +521,7 @@ io.on('connection', (socket) => {
         socket.emit('game_error', { message: "It's not your turn!" });
         return;
       }
-      if (state.turnPhase !== 'MAIN_ACTION') {
+      if (state.turnPhase !== 'main_action') {
         socket.emit('game_error', { message: "You cannot buy right now." });
         return;
       }
@@ -485,7 +550,8 @@ io.on('connection', (socket) => {
 
       const card = state.devCardDeck.pop();
       playerObj.devCards.push(card);
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
       socket.emit('game_message', { message: `You bought a ${card} card!` });
     }
   });
@@ -497,9 +563,13 @@ io.on('connection', (socket) => {
       const state = rooms[code].gameState;
       
       if (state.players[state.activePlayerIndex].id !== socket.id) return;
-      if (state.turnPhase !== 'MAIN_ACTION') {
-        socket.emit('game_error', { message: "You can only play a card during your main action phase." });
-        return;
+      if (state.turnPhase !== 'main_action') {
+        if (state.turnPhase === 'waiting_for_roll' && type === 'Knight') {
+          // Allowed
+        } else {
+          socket.emit('game_error', { message: "You can only play this card during your main action phase." });
+          return;
+        }
       }
       if (state.hasPlayedDevCardThisTurn) {
         socket.emit('game_error', { message: "You have already played a Development Card this turn." });
@@ -540,7 +610,8 @@ io.on('connection', (socket) => {
         state.roadBuildingRoadsPlaced = 0;
       }
 
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -582,7 +653,8 @@ io.on('connection', (socket) => {
         state.turnPhase = 'MOVE_ROBBER';
       }
       
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -620,10 +692,11 @@ io.on('connection', (socket) => {
       if (state.robberVictims.length > 0) {
         state.turnPhase = 'STEAL_CARD';
       } else {
-        state.turnPhase = 'MAIN_ACTION';
+        state.turnPhase = 'main_action';
       }
       
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -653,8 +726,9 @@ io.on('connection', (socket) => {
       }
       
       state.robberVictims = [];
-      state.turnPhase = 'MAIN_ACTION';
-      io.to(code).emit('turn_ended', { gameState: state });
+      state.turnPhase = 'main_action';
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -667,7 +741,7 @@ io.on('connection', (socket) => {
         socket.emit('game_error', { message: "It's not your turn!" });
         return;
       }
-      if (state.turnPhase !== 'MAIN_ACTION') {
+      if (state.turnPhase !== 'main_action') {
         socket.emit('game_error', { message: "You cannot trade right now." });
         return;
       }
@@ -711,7 +785,8 @@ io.on('connection', (socket) => {
         io.to(code).emit('port_used', { portIndex: usedPortIndex });
       }
 
-      io.to(code).emit('turn_ended', { gameState: state });
+      evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
     }
   });
 
@@ -725,7 +800,8 @@ io.on('connection', (socket) => {
       }
       if (rooms[code].undoStack && rooms[code].undoStack.length > 0) {
         rooms[code].gameState = rooms[code].undoStack.pop();
-        io.to(code).emit('turn_ended', { gameState: rooms[code].gameState });
+        evaluateWinner(code);
+      broadcastState(code, 'turn_ended');
         socket.emit('game_message', { message: "Action Undone." });
       } else {
         socket.emit('game_error', { message: "Nothing to undo." });

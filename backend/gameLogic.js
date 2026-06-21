@@ -360,6 +360,62 @@ function getPlayerTradeRates(playerId, gameState) {
   return rates;
 }
 
+function calculateLongestRoad(playerId, gameState) {
+  const { edges } = gameState.board;
+  const globalRoads = gameState.roads;
+  const buildings = gameState.buildings;
+  
+  const playerEdges = [];
+  for (const edgeId in globalRoads) {
+    if (globalRoads[edgeId] === playerId) {
+      playerEdges.push(Number(edgeId));
+    }
+  }
+
+  if (playerEdges.length === 0) return 0;
+
+  let maxLength = 0;
+  const playerNetwork = {};
+  
+  playerEdges.forEach(eId => {
+    const edge = edges[eId];
+    if (!edge) return;
+    const [n1, n2] = edge.nodes;
+    if (!playerNetwork[n1]) playerNetwork[n1] = [];
+    if (!playerNetwork[n2]) playerNetwork[n2] = [];
+    playerNetwork[n1].push(eId);
+    playerNetwork[n2].push(eId);
+  });
+
+  function dfs(currentNode, visitedEdges) {
+    maxLength = Math.max(maxLength, visitedEdges.size);
+
+    const building = buildings[currentNode];
+    if (building && building.owner !== playerId) {
+      return; 
+    }
+
+    const adjacentEdges = playerNetwork[currentNode] || [];
+    for (const eId of adjacentEdges) {
+      if (!visitedEdges.has(eId)) {
+        visitedEdges.add(eId);
+        const edge = edges[eId];
+        const nextNode = edge.nodes[0] === currentNode ? edge.nodes[1] : edge.nodes[0];
+        
+        dfs(nextNode, visitedEdges);
+        
+        visitedEdges.delete(eId);
+      }
+    }
+  }
+
+  for (const startNode in playerNetwork) {
+    dfs(Number(startNode), new Set());
+  }
+
+  return maxLength;
+}
+
 module.exports = {
   generateBoard,
   rollDice,
@@ -367,5 +423,6 @@ module.exports = {
   validateSettlement,
   validateRoad,
   validateCity,
-  getPlayerTradeRates
+  getPlayerTradeRates,
+  calculateLongestRoad
 };

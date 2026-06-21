@@ -52,6 +52,7 @@ export default function PlayPage() {
   const [reqRes, setReqRes] = useState('Brick');
   const [reqAmt, setReqAmt] = useState(1);
   const [tradeTargetId, setTradeTargetId] = useState('');
+  const [gameOver, setGameOver] = useState<{winnerName: string, score: number} | null>(null);
   const [incomingTrade, setIncomingTrade] = useState<{
     proposerId: string;
     proposerName: string;
@@ -96,6 +97,7 @@ export default function PlayPage() {
     });
 
     newSocket.on('game_started', (state) => setGameState(state));
+    newSocket.on('game_over', (data) => setGameOver(data));
     newSocket.on('dice_rolled', ({ gameState }) => setGameState(gameState));
     newSocket.on('turn_ended', ({ gameState }) => setGameState(gameState));
   };
@@ -294,6 +296,20 @@ export default function PlayPage() {
         </header>
 
         <div className="w-full max-w-sm flex-1 flex flex-col items-center">
+          {gameOver && (
+            <div className="fixed inset-0 bg-black/90 z-[100] flex flex-col items-center justify-center p-6 backdrop-blur-sm">
+              <div className="bg-gradient-to-b from-yellow-500 to-yellow-700 p-1 rounded-3xl shadow-[0_0_100px_rgba(234,179,8,0.5)] w-full max-w-sm animate-bounce">
+                <div className="bg-slate-900 rounded-3xl p-8 flex flex-col items-center border border-yellow-500/50">
+                  <div className="text-6xl mb-4">🏆</div>
+                  <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-600 mb-2 uppercase tracking-widest text-center">Victory!</h2>
+                  <p className="text-white text-xl text-center mb-6">
+                    <span className="font-bold text-yellow-400 text-3xl">{gameOver.winnerName}</span><br/>
+                    has won the game with <span className="font-black text-emerald-400">{gameOver.score}</span> VP!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {incomingTrade && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-6">
               <div className="bg-slate-800 rounded-3xl p-6 border-2 border-indigo-500 shadow-2xl w-full max-w-sm">
@@ -477,7 +493,7 @@ export default function PlayPage() {
                       )}
                     </div>
                   );
-                })() : gameState.turnPhase === 'ROLL' ? (
+                })() : gameState.turnPhase === 'waiting_for_roll' ? (
                   <button
                     onClick={handleRollDice}
                     className="w-full mt-4 bg-yellow-500 hover:bg-yellow-400 text-yellow-950 font-black text-3xl py-8 rounded-2xl shadow-[0_0_40px_rgba(234,179,8,0.4)] transform transition hover:-translate-y-2 active:translate-y-0 active:shadow-none"
@@ -659,7 +675,7 @@ export default function PlayPage() {
               {myData.devCards && myData.devCards.length > 0 ? (
                 <div className="grid grid-cols-1 gap-2">
                   {myData.devCards.map((card, idx) => {
-                    const isPlayable = isActivePlayer && gameState.turnPhase === 'MAIN_ACTION' && !gameState.hasPlayedDevCardThisTurn && card !== 'Victory Point';
+                    const isPlayable = isActivePlayer && !gameState.hasPlayedDevCardThisTurn && card !== 'Victory Point' && card !== 'Hidden VP' && (gameState.turnPhase === 'main_action' || (gameState.turnPhase === 'waiting_for_roll' && card === 'Knight'));
                     return (
                       <div key={idx} className="bg-emerald-900/40 rounded-xl p-3 flex justify-between items-center border border-emerald-700 shadow-inner">
                         <span className="font-semibold text-emerald-200 uppercase tracking-wider text-sm">{card}</span>
